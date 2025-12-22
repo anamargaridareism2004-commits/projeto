@@ -1,0 +1,272 @@
+from __future__ import annotations
+
+import numpy as np
+import random
+from dataclasses import dataclass
+from typing import Dict, List, Tuple, Optional
+
+
+CHEGADA = "chegada"
+SAIDA = "saída"
+
+# Evento = (tempo, tipo, doente_id)
+Evento = Tuple[float, str, str]
+
+# Fila de espera: (doente_id, tempo_chegada)
+Espera = Tuple[str, float]
+
+
+@dataclass
+class Medico:
+    id: str
+    ocupado: bool = False
+    doente_corrente: Optional[str] = None
+    total_tempo_ocupado: float = 0.0
+    inicio_ultima_consulta: float = 0.0
+
+
+# -----------------------------
+# Fila de eventos e fila de espera
+# -----------------------------
+def enqueue_eventos(queue: List[Evento], ev: Evento) -> None:
+    """Insere evento mantendo ordenação por tempo (simples e suficiente)."""
+    t = ev[0]
+    i = 0
+    while i < len(queue) and queue[i][0] <= t:
+        i += 1
+    queue.insert(i, ev)
+
+
+def dequeue_eventos(queue: List[Evento]) -> Evento:
+    return queue.pop(0)
+
+
+def enqueue_espera(queue: List[Espera], item: Espera) -> None:
+    queue.append(item)
+
+
+def dequeue_espera(queue: List[Espera]) -> Espera:
+    return queue.pop(0)
+
+
+def encontra_medico_livre(medicos: List[Medico]) -> Optional[int]:
+    for i, m in enumerate(medicos):
+        if not m.ocupado:
+            return i
+    return None
+
+
+# -----------------------------
+# Distribuições
+# -----------------------------
+def gera_intervalo_chegada(lmbda: float) -> float:
+    return float(np.random.exponential(1.0 / lmbda))
+
+
+def gera_tempo_consulta(media: float, distrib: str) -> float:
+    if distrib == "exponential":
+        return float(np.random.exponential(media))
+    if distrib == "normal":
+        return float(max(0.0, np.random.normal(media, 5.0)))
+    if distrib == "uniform":
+        return float(np.random.uniform(media * 0.5, media * 1.5))
+    raise ValueError(f"Distribuição desconhecida: {distrib}")
+
+
+# -----------------------------
+# PASSO 1: motor refatorado
+# -----------------------------
+def simula(params: Dict, seed: Optional[int] = None) -> Dict:
+    """
+    Simulação refatorada:
+    - recebe params
+    - devolve results (métricas + séries)
+
+    params:
+      num_medicos: int
+      taxa_chegada: float (por minuto, ex: 10/60)
+      tempo_medio_consulta: float (min)
+      tempo_simulacao: float (min)
+      distribuicao_tempo_consulta: str
+    """
+    if seed is not None:
+        random.seed(seed)
+        np.random.seed(seed)
+
+    num_medicos = int(params["num_medicos"])
+    taxa_chegada = float(params["taxa_chegada"])
+    tempo_medio_consulta = float(params["tempo_medio_consulta"])
+    tempo_simulacao = float(params["tempo_simulacao"])
+    distrib = str(params["distribuicao_tempo_consulta"])
+
+    medicos = [Medico(id=f"m{i+1}") for i in range(num_medicos)]
+    queue_eventos: List[Evento] = []
+    fila_espera: List[Espera] = []
+
+    # Guardar tempos por doente
+    t_chegada: Dict[str, float] = {}
+    t_inicio: Dict[str, float] = {}
+    t_servico: Dict[str, float] = {}
+
+    # Séries temporais
+    queue_len_series: List[Tuple[float, int]] = []
+    occ_series: List[Tuple[float, float]] = []
+
+    # Métricas
+    wait_times: List[float] = []
+    service_times: List[float] = []
+    system_times: List[float] = []
+    max_queue_len = 0
+    doentes_atendidos = 0
+
+    # 1ª chegada
+    doente_counter = 1
+    t0 = gera_intervalo_chegada(taxa_chegada)
+    enqueue_eventos(queue_eventos, (t0, CHEGADA, f"d{doente_counter}"))
+
+    while queue_eventos:
+        tempo_atual, tipo, doente = dequeue_eventos(queue_eventos)
+
+        if tempo_atual > tempo_simulacao:
+            break
+
+        # séries (amostragem em instantes de evento)
+        queue_len_series.append((tempo_atual, len(fila_espera)))
+        busy = sum(1 for m in medicos if m.ocupado)
+        occ_series.append((tempo_atual, busy / num_medicos))
+
+        if tipo == CHEGADA:
+            t_chegada[doente] = tempo_atual
+
+            # agenda próxima chegada
+            prox = tempo_atual + gera_intervalo_chegada(taxa_chegada)
+            if prox <= tempo_simulacao:
+                doente_counter += 1
+                enqueue_eventos(queue_eventos, (prox, CHEGADA, f"d{doente_counter}"))
+
+            idx = encontra_medico_livre(medicos)
+            if idx is not None:
+                # atendimento imediato
+                m = medicos[idx]
+                m.ocupado = True
+                m.doente_corrente = doente
+                m.inicio_ultima_consulta = tempo_atual
+
+                t_inicio[doente] = tempo_atual
+                wait_times.append(0.0)
+
+                dur = gera_tempo_consulta(tempo_medio_consulta, distrib)
+                t_servico[doente] = dur
+                service_times.append(dur)
+
+                enqueue_eventos(queue_eventos, (tempo_atual + dur, SAIDA, doente))
+            else:
+                # entra em fila
+                enqueue_espera(fila_espera, (doente, tempo_atual))
+                max_queue_len = max(max_queue_len, len(fila_espera))
+
+        elif tipo == SAIDA:
+            doentes_atendidos += 1
+
+            # libertar médico deste doente
+            for m in medicos:
+                if m.ocupado and m.doente_corrente == doente:
+                    m.ocupado = False
+                    m.doente_corrente = None
+                    m.total_tempo_ocupado += tempo_atual - m.inicio_ultima_consulta
+                    break
+
+            # tempo no sistema
+            if doente in t_chegada:
+                system_times.append(tempo_atual - t_chegada[doente])
+
+            # se houver fila, iniciar logo nova consulta
+            if fila_espera:
+                prox_doente, tcheg = dequeue_espera(fila_espera)
+                idx = encontra_medico_livre(medicos)
+
+                if idx is None:
+                    enqueue_espera(fila_espera, (prox_doente, tcheg))
+                else:
+                    m = medicos[idx]
+                    m.ocupado = True
+                    m.doente_corrente = prox_doente
+                    m.inicio_ultima_consulta = tempo_atual
+
+                    t_inicio[prox_doente] = tempo_atual
+                    wait_times.append(tempo_atual - tcheg)
+
+                    dur = gera_tempo_consulta(tempo_medio_consulta, distrib)
+                    t_servico[prox_doente] = dur
+                    service_times.append(dur)
+
+                    enqueue_eventos(queue_eventos, (tempo_atual + dur, SAIDA, prox_doente))
+
+        else:
+            raise ValueError(f"Evento desconhecido: {tipo}")
+
+    # finais
+    tempo_total = min(
+        tempo_simulacao,
+        queue_len_series[-1][0] if queue_len_series else tempo_simulacao
+    )
+
+    avg_queue_len = float(np.mean([q for _, q in queue_len_series])) if queue_len_series else 0.0
+    avg_occ = float(np.mean([o for _, o in occ_series])) if occ_series else 0.0
+
+    ocupacao_por_medico = {
+        m.id: (m.total_tempo_ocupado / tempo_total if tempo_total > 0 else 0.0)
+        for m in medicos
+    }
+
+    return {
+        "params": params,
+        "doentes_atendidos": doentes_atendidos,
+        "wait_times": wait_times,
+        "service_times": service_times,
+        "system_times": system_times,
+        "avg_wait": float(np.mean(wait_times)) if wait_times else 0.0,
+        "avg_service": float(np.mean(service_times)) if service_times else 0.0,
+        "avg_system": float(np.mean(system_times)) if system_times else 0.0,
+        "avg_queue_len": avg_queue_len,
+        "max_queue_len": max_queue_len,
+        "avg_occ": avg_occ,
+        "ocupacao_por_medico": ocupacao_por_medico,
+        "queue_len_series": queue_len_series,
+        "occ_series": occ_series,
+    }
+
+
+def lambda_sweep(
+    lambdas: List[float],
+    base_params: Dict,
+    runs_per_lambda: int = 20,
+    seed: Optional[int] = 123
+) -> List[Tuple[float, float]]:
+    """(λ, tamanho_médio_fila) com várias repetições por λ."""
+    out: List[Tuple[float, float]] = []
+    for i, lmbda in enumerate(lambdas):
+        vals = []
+        for r in range(runs_per_lambda):
+            s = None if seed is None else seed + i * 1000 + r
+            p = dict(base_params)
+            p["taxa_chegada"] = lmbda
+            res = simula(p, seed=s)
+            vals.append(res["avg_queue_len"])
+        out.append((lmbda, float(np.mean(vals)) if vals else 0.0))
+    return out
+
+
+if __name__ == "__main__":
+    params = {
+        "num_medicos": 3,
+        "taxa_chegada": 10 / 60,
+        "tempo_medio_consulta": 15,
+        "tempo_simulacao": 8 * 60,
+        "distribuicao_tempo_consulta": "exponential",
+    }
+    res = simula(params, seed=42)
+    print("Doentes atendidos:", res["doentes_atendidos"])
+    print("Espera média (min):", round(res["avg_wait"], 2))
+    print("Fila média:", round(res["avg_queue_len"], 2), "| máx:", res["max_queue_len"])
+    print("Ocupação média:", round(res["avg_occ"], 3))
