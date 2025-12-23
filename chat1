@@ -152,7 +152,7 @@ def simula():
     tempo_atual = tempo_atual + gera_intervalo_tempo_chegada(TAXA_CHEGADA)
     while tempo_atual < TEMPO_SIMULACAO:
         pessoa = random.choice(pessoas)
-        doente_id = pessoa["id"]
+        doente_id = pessoa["id"] + "_" + str(contadorDoentes)
         contadorDoentes += 1
         chegadas[doente_id] = tempo_atual
         queueEventos = enqueue(queueEventos, (tempo_atual, CHEGADA, doente_id))
