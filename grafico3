@@ -1,0 +1,15 @@
+import matplotlib.pyplot as plt
+import projeto as p
+
+resultados = p.simula()   
+
+esperas = resultados["tempos_espera"]
+tempo_simulacao = range(len(esperas))
+
+plt.figure()
+plt.plot(tempo_simulacao, esperas)
+plt.xlabel("Tempo da simulação (ordem dos atendimentos)")
+plt.ylabel("Tempo de espera (min)")
+plt.title("Evolução do tempo de espera ao longo da simulação")
+plt.grid(True)
+plt.show()
