@@ -1,0 +1,29 @@
+import matplotlib.pyplot as plt
+
+def grafico2_corrigido(resultados):
+    serie = resultados["serie_ocup"]  # [(tempo_min, ocupacao_0a1), ...]
+
+    # 1) manter só o ÚLTIMO valor para cada instante de tempo
+    ultimo_por_tempo = {}
+    for t, occ in serie:
+        ultimo_por_tempo[t] = occ
+
+    # 2) ordenar por tempo
+    tempos = sorted(ultimo_por_tempo.keys())
+    ocup = [ultimo_por_tempo[t] for t in tempos]
+
+    # 3) converter para horas e percentagem
+    tempos_h = [t / 60 for t in tempos]
+    ocup_pct = [o * 100 for o in ocup]
+
+    plt.figure()
+    plt.plot(tempos_h, ocup_pct)  # linha contínua (como tu queres)
+    plt.title("Gráfico 2 — Ocupação média dos médicos ao longo do tempo")
+    plt.xlabel("Tempo (horas)")
+    plt.ylabel("Ocupação média (%)")
+    plt.ylim(0, 105)  # margem para a linha a 100% aparecer
+    plt.grid(True)
+    plt.show()
+if __name__ == "__main__":
+    res = simula()
+    grafico2_corrigido(res)
