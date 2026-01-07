@@ -1,0 +1,326 @@
+import heapq
+import random
+import numpy as np
+import json
+with open("pessoas.json", encoding="utf-8") as f:
+    pessoas = json.load(f)
+
+# Parâmetros da aplicação
+# ---
+NUM_MEDICOS = 3
+TAXA_CHEGADA = 10 / 60
+TEMPO_MEDIO_CONSULTA = 15
+TEMPO_SIMULACAO = 8 * 60
+DISTRIBUICAO_TEMPO_CONSULTA = "exponential"
+
+CHEGADA = "chegada"
+SAIDA = "saída"
+
+# --- Modelo para o evento
+# Evento = (tempo: Float, tipo: String, doente: String)
+# --- Funções de manipulação
+def e_tempo(e):
+    return e[0]
+
+def e_tipo(e):
+    return e[1]
+
+def e_doente(e):
+    return e[2]
+# ---
+# --- Modelo para a Queue de Eventos
+# queueEventos = [Evento]
+# --- Funções de manipulação
+def procuraPosQueue(q, t):
+    i = 0
+    while i < len(q) and t > q[i][0]:
+        i = i + 1
+    return i
+
+def enqueue(q, e):
+    pos = procuraPosQueue(q, e[0])
+    return q[:pos] + [e] + q[pos:]
+
+def dequeue(q):
+    e = q[0]
+    q = q[1:]
+    return e, q
+
+# --- Modelo para o médico
+# Médico = [id: String, ocupado: Boolean, doente_corrente: String, total_tempo_ocupado: Float, inicio_ultima_consulta: Float]
+# --- Funções de manipulação
+def m_id(e):
+    return e[0]
+
+def m_ocupado(e):
+    return e[1]
+
+def mOcupa(m):
+    m[1] = not m[1]
+    return m
+
+def m_doente_corrente(e):
+    return e[2]
+
+def mDoenteCorrente(m, d):
+    m[2] = d
+    return m
+
+def m_total_tempo_ocupado(e):
+    return e[3]
+
+def mTempoOcupado(m, t):
+    m[3] = t
+    return m
+
+def m_inicio_ultima_consulta(e):
+    return e[4]
+
+def mInicioConsulta(m, t):
+    m[4] = t
+    return m
+# ---
+
+# --- Utilização das distribuições para gerar chegadas e durações das consultas
+# ---
+def gera_intervalo_tempo_chegada(lmbda):
+    return np.random.exponential(1 / lmbda)
+
+def gera_tempo_consulta():
+    if DISTRIBUICAO_TEMPO_CONSULTA == "exponential":
+        return np.random.exponential(TEMPO_MEDIO_CONSULTA)
+    elif DISTRIBUICAO_TEMPO_CONSULTA == "normal":
+        return max(0, np.random.normal(TEMPO_MEDIO_CONSULTA, 5))
+    elif DISTRIBUICAO_TEMPO_CONSULTA == "uniform":
+        return np.random.uniform(TEMPO_MEDIO_CONSULTA * 0.5, TEMPO_MEDIO_CONSULTA * 1.5)
+
+# --- Funções auxiliares
+# -----------------------------------------
+# --- Procura o primeiro médico livre
+# ---
+def procuraMedico(lista):
+    res = None
+    i = 0
+    encontrado = False
+    while not encontrado and i < len(lista):
+        if not lista[i][1]:
+            res = lista[i]
+            encontrado = True
+        i = i + 1
+    return res
+
+# -----------------------------------------
+
+def simula():
+    """Motor da simulação (PASSO 1).
+
+    Regras deste passo:
+    - Mantém TODOS os nomes e modelos do ficheiro base (enqueue/dequeue, queueEventos, queue, etc.)
+    - Completa com as métricas pedidas no enunciado.
+    - No fim devolve um dicionário com resultados (para a App e para os gráficos).
+    """
+
+    # --- Estado inicial ---
+    tempo_atual = 0.0
+    contadorDoentes = 1
+    queueEventos = []  # Lista de eventos ordenada por tempo
+    queue = []         # Fila de espera (FIFO): [(doente, tempo_chegada_na_fila)]
+
+    # --- médicos (mantém o modelo da ficha) ---
+    medicos = [[f"m{i}", False, None, 0.0, 0.0] for i in range(NUM_MEDICOS)]
+
+    # --- EXTRA: métricas por médico ---
+    consultas_por_medico = {m_id(m): 0 for m in medicos}
+    tempos_consulta_por_medico = {m_id(m): [] for m in medicos}
+
+    # --- chegadas (para tempo no sistema) ---
+    chegadas = {}
+
+    # --- métricas pedidas ---
+    tempos_espera = []      # tempos de espera por doente
+    tempos_consulta = []    # tempos de consulta (serviço)
+    tempos_sistema = []     # tempo total na clínica
+
+    # séries temporais (para gráficos)
+    serie_fila = []         # (tempo, len(queue))
+    serie_ocup = []         # (tempo, ocupacao_media)
+
+    max_fila = 0
+    doentes_atendidos = 0
+
+    # para saber o tempo de consulta de cada doente (para relatório/validação)
+    consulta_por_doente = {}
+
+
+    # --- Geração das chegadas (mantém a abordagem original: pré-agenda) ---
+    tempo_atual = tempo_atual + gera_intervalo_tempo_chegada(TAXA_CHEGADA)
+    while tempo_atual < TEMPO_SIMULACAO:
+        pessoa = random.choice(pessoas)
+        doente_id = pessoa["id"] + "_" + str(contadorDoentes)
+        contadorDoentes += 1
+        chegadas[doente_id] = tempo_atual
+        queueEventos = enqueue(queueEventos, (tempo_atual, CHEGADA, doente_id))
+        tempo_atual = tempo_atual + gera_intervalo_tempo_chegada(TAXA_CHEGADA)
+
+    # ========================================================
+    # Tratamento dos eventos
+    # ========================================================
+    while queueEventos != []:
+        evento, queueEventos = dequeue(queueEventos)
+        tempo_atual = e_tempo(evento)
+
+        # séries temporais no instante do evento
+        serie_fila.append((tempo_atual, len(queue)))
+        ocupados = 0
+        for m in medicos:
+            if m_ocupado(m):
+                ocupados += 1
+        serie_ocup.append((tempo_atual, ocupados / NUM_MEDICOS))
+
+        if e_tipo(evento) == CHEGADA:
+            medico_livre = procuraMedico(medicos)
+
+            if medico_livre:
+                # atendimento imediato (espera = 0)
+                tempos_espera.append(0.0)
+
+                medico_livre = mOcupa(medico_livre)
+                medico_livre = mInicioConsulta(medico_livre, tempo_atual)
+
+                tempo_c = gera_tempo_consulta()
+                # EXTRA: registo por médico
+                mid = m_id(medico_livre)
+                consultas_por_medico[mid] += 1
+                tempos_consulta_por_medico[mid].append(tempo_c)
+
+                tempos_consulta.append(tempo_c)
+                consulta_por_doente[e_doente(evento)] = tempo_c
+
+                medico_livre = mDoenteCorrente(medico_livre, e_doente(evento))
+                queueEventos = enqueue(queueEventos, (tempo_atual + tempo_c, SAIDA, e_doente(evento)))
+            else:
+                # entra na fila de espera
+                queue.append((evento[2], tempo_atual))
+                if len(queue) > max_fila:
+                    max_fila = len(queue)
+
+        elif evento[1] == SAIDA:
+            doentes_atendidos += 1
+
+            # tempo no sistema = saída - chegada
+            d = e_doente(evento)
+            if d in chegadas:
+                tempos_sistema.append(tempo_atual - chegadas[d])
+
+            # libertar o médico que estava a atender este doente
+            i = 0
+            encontrado = False
+            while i < len(medicos) and not encontrado:
+                if m_doente_corrente(medicos[i]) == d:
+                    medicos[i] = mOcupa(medicos[i])
+                    medicos[i] = mDoenteCorrente(medicos[i], None)
+                    medicos[i] = mTempoOcupado(
+                        medicos[i],
+                        m_total_tempo_ocupado(medicos[i]) + tempo_atual - m_inicio_ultima_consulta(medicos[i])
+                    )
+                    encontrado = True
+                i = i + 1
+
+            medico = medicos[i-1]
+
+            # se há fila, ocupar imediatamente o médico livre
+            if queue != []:
+                ev, queue = dequeue(queue)
+                prox_doente, tchegada = ev
+
+                # espera do prox_doente (desde que entrou na fila)
+                tempos_espera.append(tempo_atual - tchegada)
+
+                medico = mOcupa(medico)
+                medico = mInicioConsulta(medico, tempo_atual)
+                medico = mDoenteCorrente(medico, prox_doente)
+
+                tempo_c = gera_tempo_consulta()
+                # EXTRA: registo por médico
+                mid = m_id(medico)
+                consultas_por_medico[mid] += 1
+                tempos_consulta_por_medico[mid].append(tempo_c)
+
+                tempos_consulta.append(tempo_c)
+                consulta_por_doente[prox_doente] = tempo_c
+
+                queueEventos = enqueue(queueEventos, (tempo_atual + tempo_c, SAIDA, prox_doente))
+
+    # ========================================================
+    # Resultados finais (métricas)
+    # ========================================================
+    tempo_total = serie_fila[-1][0] if serie_fila else TEMPO_SIMULACAO
+
+    fila_media = float(np.mean([x[1] for x in serie_fila])) if serie_fila else 0.0
+    ocup_media = float(np.mean([x[1] for x in serie_ocup])) if serie_ocup else 0.0
+    espera_media = float(np.mean(tempos_espera)) if tempos_espera else 0.0
+    consulta_media = float(np.mean(tempos_consulta)) if tempos_consulta else 0.0
+    sistema_medio = float(np.mean(tempos_sistema)) if tempos_sistema else 0.0
+
+    ocupacao_por_medico = {}
+    for m in medicos:
+        if tempo_total > 0:
+            ocupacao_por_medico[m_id(m)] = m_total_tempo_ocupado(m) / tempo_total
+        else:
+            ocupacao_por_medico[m_id(m)] = 0.0
+
+    # --- EXTRA: resumo de métricas por médico ---
+    metricas_por_medico = {}
+    for m in medicos:
+        mid = m_id(m)
+        t_list = tempos_consulta_por_medico.get(mid, [])
+        metricas_por_medico[mid] = {
+            "consultas": int(consultas_por_medico.get(mid, 0)),
+            "tempo_total_ocupado": float(m_total_tempo_ocupado(m)),
+            "tempo_medio_consulta": float(np.mean(t_list)) if t_list else 0.0,
+            "ocupacao": float(ocupacao_por_medico.get(mid, 0.0)),
+        }
+
+    resultados = {
+        "doentes_atendidos": doentes_atendidos,
+        "tempo_medio_espera": espera_media,
+        "tempo_medio_consulta": consulta_media,
+        "tempo_medio_sistema": sistema_medio,
+        "tamanho_medio_fila": fila_media,
+        "tamanho_max_fila": max_fila,
+        "ocupacao_media": ocup_media,
+        "ocupacao_por_medico": ocupacao_por_medico,
+        "metricas_por_medico": metricas_por_medico,
+        "serie_fila": serie_fila,
+        "serie_ocup": serie_ocup,
+        "tempos_espera": tempos_espera,
+        "tempos_consulta": tempos_consulta,
+        "tempos_sistema": tempos_sistema,
+        "consulta_por_doente": consulta_por_doente,
+        "ocupacao_por_medico": ocupacao_por_medico,
+    }
+
+    # prints (mantém comportamento "script")
+    print(f"Doentes atendidos: {doentes_atendidos}")
+    print(f"Tempo médio de espera (min): {round(espera_media, 2)}")
+    print(f"Tempo médio de consulta (min): {round(consulta_media, 2)}")
+    print(f"Tempo médio no sistema (min): {round(sistema_medio, 2)}")
+    print(f"Tamanho médio da fila: {round(fila_media, 2)} | Máx: {max_fila}")
+    print(f"Ocupação média: {round(ocup_media, 3)}")
+    print("Ocupação por médico (%):")
+    for m, v in ocupacao_por_medico.items():
+        print(f"  {m}: {round(v * 100, 2)}%")
+
+    print("Métricas por médico:")
+    for mid, mm in metricas_por_medico.items():
+        print(
+            f"  {mid}: consultas={mm['consultas']} | "
+            f"ocup={mm['ocupacao']*100:.2f}% | "
+            f"tm_consulta={mm['tempo_medio_consulta']:.2f} min | "
+            f"t_ocup={mm['tempo_total_ocupado']:.2f} min"
+        )
+
+    return resultados
+
+if __name__ == "__main__":
+    simula()
