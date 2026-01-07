@@ -1,0 +1,341 @@
+import json
+import FreeSimpleGUI as sg
+
+import matplotlib
+matplotlib.use("TkAgg")  # <- antes do pyplot
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+import clinic_extras as c  # <- o teu motor
+
+
+CONFIG_PATH = "config.json"
+
+
+# ---------------- CONFIG JSON ----------------
+def load_config(path=CONFIG_PATH):
+    defaults = {
+        "NUM_MEDICOS": getattr(c, "NUM_MEDICOS", 3),
+        "TAXA_CHEGADA_HORA": float(getattr(c, "TAXA_CHEGADA", 10 / 60.0)) * 60.0,  # doentes/hora
+        "TEMPO_MEDIO_CONSULTA": getattr(c, "TEMPO_MEDIO_CONSULTA", 15),
+        "TEMPO_SIMULACAO": getattr(c, "TEMPO_SIMULACAO", 480),
+        "DISTRIBUICAO_TEMPO_CONSULTA": getattr(c, "DISTRIBUICAO_TEMPO_CONSULTA", "exponential"),
+    }
+    try:
+        with open(path, encoding="utf-8") as f:
+            cfg = json.load(f)
+
+        # JSON guarda TAXA_CHEGADA em doentes/min (compatível com motor)
+        if "TAXA_CHEGADA" in cfg and "TAXA_CHEGADA_HORA" not in cfg:
+            cfg["TAXA_CHEGADA_HORA"] = float(cfg["TAXA_CHEGADA"]) * 60.0
+
+        for k in defaults:
+            if k in cfg:
+                defaults[k] = cfg[k]
+    except Exception:
+        pass
+    return defaults
+
+
+def save_config(values, path=CONFIG_PATH):
+    cfg = {
+        "NUM_MEDICOS": int(values["NUM_MEDICOS"]),
+        "TAXA_CHEGADA": float(values["TAXA_CHEGADA_HORA"]) / 60.0,  # doentes/min
+        "TEMPO_MEDIO_CONSULTA": float(values["TEMPO_MEDIO_CONSULTA"]),
+        "TEMPO_SIMULACAO": float(values["TEMPO_SIMULACAO"]),
+        "DISTRIBUICAO_TEMPO_CONSULTA": values["DISTRIBUICAO_TEMPO_CONSULTA"],
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2)
+
+
+def apply_to_model(values):
+    c.NUM_MEDICOS = int(values["NUM_MEDICOS"])
+    c.TAXA_CHEGADA = float(values["TAXA_CHEGADA_HORA"]) / 60.0
+    c.TEMPO_MEDIO_CONSULTA = float(values["TEMPO_MEDIO_CONSULTA"])
+    c.TEMPO_SIMULACAO = float(values["TEMPO_SIMULACAO"])
+    c.DISTRIBUICAO_TEMPO_CONSULTA = values["DISTRIBUICAO_TEMPO_CONSULTA"]
+
+
+def parse_inputs(values):
+    out = dict(values)
+    out["NUM_MEDICOS"] = int(float(values["NUM_MEDICOS"]))
+    out["TAXA_CHEGADA_HORA"] = float(values["TAXA_CHEGADA_HORA"])
+    out["TEMPO_MEDIO_CONSULTA"] = float(values["TEMPO_MEDIO_CONSULTA"])
+    out["TEMPO_SIMULACAO"] = float(values["TEMPO_SIMULACAO"])
+    out["DISTRIBUICAO_TEMPO_CONSULTA"] = values["DISTRIBUICAO_TEMPO_CONSULTA"]
+    return out
+
+
+# ---------------- GRÁFICOS ----------------
+def graf_esperas_por_atendimento(res):
+    esperas = res["tempos_espera"]
+    x = list(range(len(esperas)))
+
+    plt.figure(figsize=(9, 4.5))
+    plt.plot(x, esperas)
+    plt.xlabel("Ordem dos atendimentos")
+    plt.ylabel("Tempo de espera (min)")
+    plt.title("Evolução do tempo de espera (por doente atendido)")
+    plt.grid(True)
+    plt.show()
+
+
+def graf_lambda_vs_espera(repeticoes=20):
+    resultados = []
+    taxa_original = c.TAXA_CHEGADA
+
+    for lam in range(10, 31):
+        c.TAXA_CHEGADA = lam / 60.0
+
+        esperas = []
+        for _ in range(repeticoes):
+            res = c.simula()
+            esperas.append(res["tempo_medio_espera"])
+
+        resultados.append((lam, float(np.mean(esperas))))
+
+    c.TAXA_CHEGADA = taxa_original
+
+    x = [lam for lam, _ in resultados]
+    y = [v for _, v in resultados]
+
+    plt.figure(figsize=(9, 4.5))
+    plt.plot(x, y, label="Tempo médio de espera")
+    plt.title("Relação entre λ e o tempo médio de espera")
+    plt.xlabel("Taxa de chegada λ (doentes/hora)")
+    plt.ylabel("Tempo médio de espera (min)")
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+
+
+def graf_evolucao_fila(res):
+    serie = res.get("serie_fila", [])
+    tempos_h = [t / 60.0 for t, _ in serie]
+    filas = [f for _, f in serie]
+
+    plt.figure(figsize=(9, 4.5))
+    plt.plot(tempos_h, filas)
+    plt.xlabel("Tempo da simulação (horas)")
+    plt.ylabel("Tamanho da fila")
+    plt.title("Evolução do tamanho da fila ao longo do tempo")
+    plt.grid(True)
+    plt.show()
+
+
+def graf_evolucao_ocup(res):
+    serie = res.get("serie_ocup", [])
+
+    # manter último valor por tempo
+    ultimo = {}
+    for t, occ in serie:
+        ultimo[t] = occ
+
+    tempos = sorted(ultimo.keys())
+    tempos_h = [t / 60.0 for t in tempos]
+    ocup_pct = [ultimo[t] * 100 for t in tempos]
+
+    plt.figure(figsize=(9, 4.5))
+    plt.plot(tempos_h, ocup_pct)
+    plt.xlabel("Tempo (horas)")
+    plt.ylabel("Ocupação média (%)")
+    plt.title("Ocupação média dos médicos ao longo do tempo")
+    plt.ylim(0, 105)
+    plt.grid(True)
+    plt.show()
+
+
+def graf_hist_espera(res):
+    esperas = res.get("tempos_espera", [])
+
+    plt.figure(figsize=(9, 4.5))
+    plt.hist(esperas, bins=20)
+    plt.xlabel("Tempo de espera (min)")
+    plt.ylabel("Número de doentes")
+    plt.title("Distribuição dos tempos de espera")
+    plt.grid(True)
+    plt.show()
+
+
+# ---------------- GUI ----------------
+def main():
+    sg.theme("SystemDefault")
+
+    cfg = load_config(CONFIG_PATH)
+    dist_opts = ["exponential", "normal", "uniform"]
+
+    layout = [
+        [sg.Text("App Simulação Clínica", font=("Arial", 16, "bold"))],
+
+        [sg.Frame("Config (config.json)", [
+            [sg.Text("Médicos", size=(12, 1)),
+             sg.Input(str(cfg["NUM_MEDICOS"]), key="NUM_MEDICOS", size=(10, 1)),
+             sg.Text("λ (doentes/h)", size=(12, 1)),
+             sg.Input(str(cfg["TAXA_CHEGADA_HORA"]), key="TAXA_CHEGADA_HORA", size=(10, 1))],
+
+            [sg.Text("T. médio consulta (min)", size=(18, 1)),
+             sg.Input(str(cfg["TEMPO_MEDIO_CONSULTA"]), key="TEMPO_MEDIO_CONSULTA", size=(10, 1)),
+             sg.Text("T. simulação (min)", size=(16, 1)),
+             sg.Input(str(cfg["TEMPO_SIMULACAO"]), key="TEMPO_SIMULACAO", size=(10, 1))],
+
+            [sg.Text("Distribuição", size=(12, 1)),
+             sg.Combo(dist_opts, default_value=cfg["DISTRIBUICAO_TEMPO_CONSULTA"],
+                      key="DISTRIBUICAO_TEMPO_CONSULTA", readonly=True),
+             sg.Button("Guardar JSON", key="-SAVEJSON-"),
+             sg.Button("Recarregar JSON", key="-LOADJSON-")]
+        ])],
+
+        [sg.Frame("Ações", [
+            [sg.Button("Correr simulação", key="-RUN-", size=(18, 1)),
+             sg.Button("Gráfico: esperas", key="-PLOT_ESP-", size=(16, 1), disabled=True),
+             sg.Button("Gráfico: λ vs espera", key="-PLOT_LAM-", size=(16, 1)),
+             sg.Button("Evolução fila", key="-PLOT_FILA-", size=(14, 1), disabled=True),
+             sg.Button("Evolução ocupação", key="-PLOT_OCUP-", size=(16, 1), disabled=True),
+             sg.Button("Histograma", key="-PLOT_HIST-", size=(12, 1), disabled=True),
+             sg.Button("Sair", key="-EXIT-", size=(10, 1))]
+        ])],
+
+        [sg.Frame("λ vs espera", [
+            [sg.Text("Repetições por λ:", size=(16, 1)),
+             sg.Input("20", key="-REP-", size=(10, 1))]
+        ])],
+
+        [sg.Frame("Resultados (última simulação)", [
+            [sg.Text("Doentes atendidos:", size=(26, 1)), sg.Text("-", key="-DOENTES-")],
+            [sg.Text("Tempo médio de espera (min):", size=(26, 1)), sg.Text("-", key="-ESPERA-")],
+            [sg.Text("Tempo médio de consulta (min):", size=(26, 1)), sg.Text("-", key="-CONSULTA-")],
+            [sg.Text("Tempo médio no sistema (min):", size=(26, 1)), sg.Text("-", key="-SISTEMA-")],
+            [sg.Text("Tamanho médio da fila:", size=(26, 1)), sg.Text("-", key="-FILA_MEDIA-")],
+            [sg.Text("Tamanho máximo da fila:", size=(26, 1)), sg.Text("-", key="-FILA_MAX-")],
+            [sg.Text("Ocupação média:", size=(26, 1)), sg.Text("-", key="-OCUP_MEDIA-")],
+        ])],
+
+        [sg.Frame("Ocupação por médico (%)", [
+            [sg.Multiline("", key="-OCUP_MED-", size=(70, 8), disabled=True)]
+        ])],
+
+        [sg.Frame("Métricas por médico (extra)", [
+            [sg.Multiline("", key="-MET_MED-", size=(70, 8), disabled=True)]
+        ])],
+
+        [sg.StatusBar("Pronto.", key="-STATUS-")]
+    ]
+
+    window = sg.Window(
+        "Simulação Clínica",
+        layout,
+        finalize=True,
+        size=(1100, 750),
+        resizable=True
+    )
+
+    resultados = None
+
+    while True:
+        event, values = window.read()
+        if event in (sg.WINDOW_CLOSED, "-EXIT-"):
+            break
+
+        if event == "-SAVEJSON-":
+            try:
+                v = parse_inputs(values)
+                save_config(v, CONFIG_PATH)
+                window["-STATUS-"].update("Config guardada em config.json")
+            except Exception as e:
+                sg.popup_error(f"Erro ao guardar JSON: {e}")
+
+        if event == "-LOADJSON-":
+            cfg = load_config(CONFIG_PATH)
+            window["NUM_MEDICOS"].update(str(cfg["NUM_MEDICOS"]))
+            window["TAXA_CHEGADA_HORA"].update(str(cfg["TAXA_CHEGADA_HORA"]))
+            window["TEMPO_MEDIO_CONSULTA"].update(str(cfg["TEMPO_MEDIO_CONSULTA"]))
+            window["TEMPO_SIMULACAO"].update(str(cfg["TEMPO_SIMULACAO"]))
+            window["DISTRIBUICAO_TEMPO_CONSULTA"].update(cfg["DISTRIBUICAO_TEMPO_CONSULTA"])
+            window["-STATUS-"].update("Config recarregada do JSON")
+
+        if event == "-RUN-":
+            window["-STATUS-"].update("A correr simulação...")
+            try:
+                v = parse_inputs(values)
+                apply_to_model(v)
+
+                resultados = c.simula()
+
+                window["-DOENTES-"].update(str(resultados["doentes_atendidos"]))
+                window["-ESPERA-"].update(f'{resultados["tempo_medio_espera"]:.2f}')
+                window["-CONSULTA-"].update(f'{resultados["tempo_medio_consulta"]:.2f}')
+                window["-SISTEMA-"].update(f'{resultados["tempo_medio_sistema"]:.2f}')
+                window["-FILA_MEDIA-"].update(f'{resultados["tamanho_medio_fila"]:.2f}')
+                window["-FILA_MAX-"].update(str(resultados["tamanho_max_fila"]))
+                window["-OCUP_MEDIA-"].update(f'{resultados["ocupacao_media"]:.3f}')
+
+                linhas = [f"{mid}: {v*100:.2f}%" for mid, v in resultados["ocupacao_por_medico"].items()]
+                window["-OCUP_MED-"].update("\n".join(linhas))
+
+                met = resultados.get("metricas_por_medico", {})
+                if met:
+                    linhas2 = []
+                    for mid, mm in met.items():
+                        linhas2.append(
+                            f"{mid}: consultas={mm.get('consultas','-')} | "
+                            f"ocup={mm.get('ocupacao',0)*100:.2f}% | "
+                            f"tm_consulta={mm.get('tempo_medio_consulta',0):.2f} | "
+                            f"t_ocup={mm.get('tempo_total_ocupado',0):.2f}"
+                        )
+                    window["-MET_MED-"].update("\n".join(linhas2))
+                else:
+                    window["-MET_MED-"].update("(o teu motor não devolveu metricas_por_medico)")
+
+                window["-PLOT_ESP-"].update(disabled=False)
+                window["-PLOT_FILA-"].update(disabled=False)
+                window["-PLOT_OCUP-"].update(disabled=False)
+                window["-PLOT_HIST-"].update(disabled=False)
+
+                window["-STATUS-"].update("Simulação concluída.")
+            except FileNotFoundError:
+                window["-STATUS-"].update("Erro: pessoas.json não encontrado.")
+                sg.popup_error("Não encontrei pessoas.json.\nConfirma que está na mesma pasta.")
+            except Exception as e:
+                window["-STATUS-"].update("Erro ao correr a simulação.")
+                sg.popup_error(f"Erro: {e}")
+
+        if event == "-PLOT_ESP-" and resultados is not None:
+            graf_esperas_por_atendimento(resultados)
+
+        if event == "-PLOT_FILA-" and resultados is not None:
+            graf_evolucao_fila(resultados)
+
+        if event == "-PLOT_OCUP-" and resultados is not None:
+            graf_evolucao_ocup(resultados)
+
+        if event == "-PLOT_HIST-" and resultados is not None:
+            graf_hist_espera(resultados)
+
+        if event == "-PLOT_LAM-":
+            try:
+                rep = int(values["-REP-"])
+                if rep <= 0:
+                    raise ValueError
+            except Exception:
+                sg.popup_error("Repetições inválidas. Mete um inteiro > 0.")
+                continue
+
+            window["-STATUS-"].update(f"A gerar gráfico λ vs espera (repetições={rep})...")
+            try:
+                # respeitar parâmetros atuais antes de variar λ
+                v = parse_inputs(values)
+                apply_to_model(v)
+
+                graf_lambda_vs_espera(repeticoes=rep)
+                window["-STATUS-"].update("Gráfico gerado.")
+            except Exception as e:
+                window["-STATUS-"].update("Erro ao gerar gráfico.")
+                sg.popup_error(f"Erro: {e}")
+
+    window.close()
+
+
+if __name__ == "__main__":
+    main()
