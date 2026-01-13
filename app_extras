@@ -2,22 +2,21 @@ import json
 import FreeSimpleGUI as sg
 
 import matplotlib
-matplotlib.use("TkAgg")  # <- antes do pyplot
+matplotlib.use("TkAgg")  
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-import clinic_extras as c  # <- o teu motor
+import clinic_extras as c  
 
 
 CONFIG_PATH = "config.json"
 
 
-# ---------------- CONFIG JSON ----------------
 def load_config(path=CONFIG_PATH):
     defaults = {
         "NUM_MEDICOS": getattr(c, "NUM_MEDICOS", 3),
-        "TAXA_CHEGADA_HORA": float(getattr(c, "TAXA_CHEGADA", 10 / 60.0)) * 60.0,  # doentes/hora
+        "TAXA_CHEGADA_HORA": float(getattr(c, "TAXA_CHEGADA", 10 / 60.0)) * 60.0,  
         "TEMPO_MEDIO_CONSULTA": getattr(c, "TEMPO_MEDIO_CONSULTA", 15),
         "TEMPO_SIMULACAO": getattr(c, "TEMPO_SIMULACAO", 480),
         "DISTRIBUICAO_TEMPO_CONSULTA": getattr(c, "DISTRIBUICAO_TEMPO_CONSULTA", "exponential"),
@@ -26,7 +25,6 @@ def load_config(path=CONFIG_PATH):
         with open(path, encoding="utf-8") as f:
             cfg = json.load(f)
 
-        # JSON guarda TAXA_CHEGADA em doentes/min (compatível com motor)
         if "TAXA_CHEGADA" in cfg and "TAXA_CHEGADA_HORA" not in cfg:
             cfg["TAXA_CHEGADA_HORA"] = float(cfg["TAXA_CHEGADA"]) * 60.0
 
@@ -41,7 +39,7 @@ def load_config(path=CONFIG_PATH):
 def save_config(values, path=CONFIG_PATH):
     cfg = {
         "NUM_MEDICOS": int(values["NUM_MEDICOS"]),
-        "TAXA_CHEGADA": float(values["TAXA_CHEGADA_HORA"]) / 60.0,  # doentes/min
+        "TAXA_CHEGADA": float(values["TAXA_CHEGADA_HORA"]) / 60.0,  
         "TEMPO_MEDIO_CONSULTA": float(values["TEMPO_MEDIO_CONSULTA"]),
         "TEMPO_SIMULACAO": float(values["TEMPO_SIMULACAO"]),
         "DISTRIBUICAO_TEMPO_CONSULTA": values["DISTRIBUICAO_TEMPO_CONSULTA"],
@@ -79,6 +77,7 @@ def graf_esperas_por_atendimento(res):
     plt.ylabel("Tempo de espera (min)")
     plt.title("Evolução do tempo de espera (por doente atendido)")
     plt.grid(True)
+    plt.get_current_fig_manager().window.state('zoomed')
     plt.show()
 
 
@@ -108,6 +107,7 @@ def graf_lambda_vs_espera(repeticoes=20):
     plt.ylabel("Tempo médio de espera (min)")
     plt.grid(True)
     plt.legend()
+    plt.get_current_fig_manager().window.state('zoomed')
     plt.show()
 
 
@@ -122,13 +122,12 @@ def graf_evolucao_fila(res):
     plt.ylabel("Tamanho da fila")
     plt.title("Evolução do tamanho da fila ao longo do tempo")
     plt.grid(True)
+    plt.get_current_fig_manager().window.state('zoomed')
     plt.show()
 
 
 def graf_evolucao_ocup(res):
     serie = res.get("serie_ocup", [])
-
-    # manter último valor por tempo
     ultimo = {}
     for t, occ in serie:
         ultimo[t] = occ
@@ -144,6 +143,7 @@ def graf_evolucao_ocup(res):
     plt.title("Ocupação média dos médicos ao longo do tempo")
     plt.ylim(0, 105)
     plt.grid(True)
+    plt.get_current_fig_manager().window.state('zoomed')
     plt.show()
 
 
@@ -156,72 +156,74 @@ def graf_hist_espera(res):
     plt.ylabel("Número de doentes")
     plt.title("Distribuição dos tempos de espera")
     plt.grid(True)
+    plt.get_current_fig_manager().window.state('zoomed')
     plt.show()
 
 
-# ---------------- GUI ----------------
+# ---------------- APP ----------------
 def main():
     sg.theme("SystemDefault")
 
     cfg = load_config(CONFIG_PATH)
     dist_opts = ["exponential", "normal", "uniform"]
 
+        
     layout = [
-        [sg.Text("App Simulação Clínica", font=("Arial", 16, "bold"))],
-
+        [sg.Text("App Simulação Clínica", font=("Arial", 18, "bold"), expand_x=True)],
         [sg.Frame("Config (config.json)", [
-            [sg.Text("Médicos", size=(12, 1)),
-             sg.Input(str(cfg["NUM_MEDICOS"]), key="NUM_MEDICOS", size=(10, 1)),
-             sg.Text("λ (doentes/h)", size=(12, 1)),
-             sg.Input(str(cfg["TAXA_CHEGADA_HORA"]), key="TAXA_CHEGADA_HORA", size=(10, 1))],
+            [sg.Text("Médicos", size=(12, 1), font=("Arial", 13)),
+            sg.Input(str(cfg["NUM_MEDICOS"]), key="NUM_MEDICOS", size=(10, 1), font=("Arial", 13)),
+            sg.Text("λ (doentes/h)", size=(12, 1), font=("Arial", 13)),
+            sg.Input(str(cfg["TAXA_CHEGADA_HORA"]), key="TAXA_CHEGADA_HORA", size=(10, 1), font=("Arial", 13))],
 
-            [sg.Text("T. médio consulta (min)", size=(18, 1)),
-             sg.Input(str(cfg["TEMPO_MEDIO_CONSULTA"]), key="TEMPO_MEDIO_CONSULTA", size=(10, 1)),
-             sg.Text("T. simulação (min)", size=(16, 1)),
-             sg.Input(str(cfg["TEMPO_SIMULACAO"]), key="TEMPO_SIMULACAO", size=(10, 1))],
+            [sg.Text("T. médio consulta (min)", size=(18, 1), font=("Arial", 13)),
+            sg.Input(str(cfg["TEMPO_MEDIO_CONSULTA"]), key="TEMPO_MEDIO_CONSULTA", size=(10, 1), font=("Arial", 13)),
+            sg.Text("T. simulação (min)", size=(16, 1), font=("Arial", 13)),
+            sg.Input(str(cfg["TEMPO_SIMULACAO"]), key="TEMPO_SIMULACAO", size=(10, 1), font=("Arial", 13))],
 
-            [sg.Text("Distribuição", size=(12, 1)),
-             sg.Combo(dist_opts, default_value=cfg["DISTRIBUICAO_TEMPO_CONSULTA"],
-                      key="DISTRIBUICAO_TEMPO_CONSULTA", readonly=True),
-             sg.Button("Guardar JSON", key="-SAVEJSON-"),
-             sg.Button("Recarregar JSON", key="-LOADJSON-")]
-        ])],
+            [sg.Text("Distribuição", size=(12, 1), font=("Arial", 13)),
+            sg.Combo(dist_opts, default_value=cfg["DISTRIBUICAO_TEMPO_CONSULTA"],
+                    key="DISTRIBUICAO_TEMPO_CONSULTA", readonly=True, font=("Arial", 13)),
+            sg.Button("Guardar JSON", key="-SAVEJSON-", font=("Arial", 13)),
+            sg.Button("Recarregar JSON", key="-LOADJSON-", font=("Arial", 13))]
+        ], expand_x=True)],
 
         [sg.Frame("Ações", [
-            [sg.Button("Correr simulação", key="-RUN-", size=(18, 1)),
-             sg.Button("Gráfico: esperas", key="-PLOT_ESP-", size=(16, 1), disabled=True),
-             sg.Button("Gráfico: λ vs espera", key="-PLOT_LAM-", size=(16, 1)),
-             sg.Button("Evolução fila", key="-PLOT_FILA-", size=(14, 1), disabled=True),
-             sg.Button("Evolução ocupação", key="-PLOT_OCUP-", size=(16, 1), disabled=True),
-             sg.Button("Histograma", key="-PLOT_HIST-", size=(12, 1), disabled=True),
-             sg.Button("Sair", key="-EXIT-", size=(10, 1))]
-        ])],
+            [sg.Button("Correr simulação", key="-RUN-", size=(18, 1), font=("Arial", 13)),
+            sg.Button("Gráfico: esperas", key="-PLOT_ESP-", size=(16, 1), disabled=True, font=("Arial", 13)),
+            sg.Button("Gráfico: λ vs espera", key="-PLOT_LAM-", size=(16, 1), font=("Arial", 13)),
+            sg.Button("Evolução fila", key="-PLOT_FILA-", size=(14, 1), disabled=True, font=("Arial", 13)),
+            sg.Button("Evolução ocupação", key="-PLOT_OCUP-", size=(16, 1), disabled=True, font=("Arial", 13)),
+            sg.Button("Histograma", key="-PLOT_HIST-", size=(12, 1), disabled=True, font=("Arial", 13)),
+            sg.Button("Sair", key="-EXIT-", size=(10, 1), font=("Arial", 13))]
+        ], expand_x=True)],
 
         [sg.Frame("λ vs espera", [
-            [sg.Text("Repetições por λ:", size=(16, 1)),
-             sg.Input("20", key="-REP-", size=(10, 1))]
-        ])],
+            [sg.Text("Repetições por λ:", size=(16, 1), font=("Arial", 13)),
+            sg.Input("20", key="-REP-", size=(10, 1), font=("Arial", 13))]
+        ], expand_x=True)],
 
         [sg.Frame("Resultados (última simulação)", [
-            [sg.Text("Doentes atendidos:", size=(26, 1)), sg.Text("-", key="-DOENTES-")],
-            [sg.Text("Tempo médio de espera (min):", size=(26, 1)), sg.Text("-", key="-ESPERA-")],
-            [sg.Text("Tempo médio de consulta (min):", size=(26, 1)), sg.Text("-", key="-CONSULTA-")],
-            [sg.Text("Tempo médio no sistema (min):", size=(26, 1)), sg.Text("-", key="-SISTEMA-")],
-            [sg.Text("Tamanho médio da fila:", size=(26, 1)), sg.Text("-", key="-FILA_MEDIA-")],
-            [sg.Text("Tamanho máximo da fila:", size=(26, 1)), sg.Text("-", key="-FILA_MAX-")],
-            [sg.Text("Ocupação média:", size=(26, 1)), sg.Text("-", key="-OCUP_MEDIA-")],
-        ])],
+            [sg.Text("Doentes atendidos:", size=(26, 1), font=("Arial", 14)), sg.Text("-", key="-DOENTES-", font=("Arial", 14))],
+            [sg.Text("Tempo médio de espera (min):", size=(26, 1), font=("Arial", 14)), sg.Text("-", key="-ESPERA-", font=("Arial", 14))],
+            [sg.Text("Tempo médio de consulta (min):", size=(26, 1), font=("Arial", 14)), sg.Text("-", key="-CONSULTA-", font=("Arial", 14))],
+            [sg.Text("Tempo médio no sistema (min):", size=(26, 1), font=("Arial", 14)), sg.Text("-", key="-SISTEMA-", font=("Arial", 14))],
+            [sg.Text("Tamanho médio da fila:", size=(26, 1), font=("Arial", 14)), sg.Text("-", key="-FILA_MEDIA-", font=("Arial", 14))],
+            [sg.Text("Tamanho máximo da fila:", size=(26, 1), font=("Arial", 14)), sg.Text("-", key="-FILA_MAX-", font=("Arial", 14))],
+            [sg.Text("Ocupação média:", size=(26, 1), font=("Arial", 14)), sg.Text("-", key="-OCUP_MEDIA-", font=("Arial", 14))],
+        ], expand_x=True)],
 
         [sg.Frame("Ocupação por médico (%)", [
-            [sg.Multiline("", key="-OCUP_MED-", size=(70, 8), disabled=True)]
-        ])],
+            [sg.Multiline("", key="-OCUP_MED-", size=(70, 8), disabled=True, expand_x=True, expand_y=True, font=("Consolas", 18))]
+        ], expand_x=True, expand_y=True)],
 
         [sg.Frame("Métricas por médico (extra)", [
-            [sg.Multiline("", key="-MET_MED-", size=(70, 8), disabled=True)]
-        ])],
+            [sg.Multiline("", key="-MET_MED-", size=(70, 8), disabled=True, expand_x=True, expand_y=True, font=("Consolas", 18))]
+        ], expand_x=True, expand_y=True)],
 
-        [sg.StatusBar("Pronto.", key="-STATUS-")]
-    ]
+        [sg.StatusBar("Pronto.", key="-STATUS-", expand_x=True, font=("Arial", 13))]
+]   
+
 
     window = sg.Window(
         "Simulação Clínica",
@@ -230,6 +232,7 @@ def main():
         size=(1100, 750),
         resizable=True
     )
+    window.Maximize()
 
     resultados = None
 
@@ -324,7 +327,6 @@ def main():
 
             window["-STATUS-"].update(f"A gerar gráfico λ vs espera (repetições={rep})...")
             try:
-                # respeitar parâmetros atuais antes de variar λ
                 v = parse_inputs(values)
                 apply_to_model(v)
 
