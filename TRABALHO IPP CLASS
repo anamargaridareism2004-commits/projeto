@@ -1,0 +1,164 @@
+import json
+
+
+class Percurso:
+    def __init__(self, origem, destino, poluicao, inclinacao, zonas_verdes):
+        self.origem = origem
+        self.destino = destino
+        self.poluicao = poluicao
+        self.inclinacao = inclinacao
+        self.zonas_verdes = zonas_verdes
+
+    def calcular_conforto(self, perfil):
+        conforto = 100
+
+        if perfil == "idoso":
+            conforto = conforto - (self.poluicao * 2)
+            conforto = conforto - (self.inclinacao * 3)
+            conforto = conforto + (self.zonas_verdes * 2)
+
+        elif perfil == "mobilidade_reduzida":
+            conforto = conforto - (self.poluicao * 2)
+            conforto = conforto - (self.inclinacao * 4)
+            conforto = conforto + (self.zonas_verdes * 1)
+
+        else:  
+            conforto = conforto - (self.poluicao * 2)
+            conforto = conforto - (self.inclinacao * 1)
+            conforto = conforto + (self.zonas_verdes * 2)
+
+        return conforto
+
+    def mostrar(self):
+        return (
+            "Percurso: " + self.origem + " -> " + self.destino +
+            " | Poluição: " + str(self.poluicao) +
+            " | Inclinação: " + str(self.inclinacao) +
+            " | Zonas verdes: " + str(self.zonas_verdes)
+        )
+
+
+class Utilizador:
+    def __init__(self, nome, perfil):
+        self.nome = nome
+        self.perfil = perfil
+
+    def mostrar(self):
+        return "Utilizador: " + self.nome + " | Perfil: " + self.perfil
+
+
+class Sistema:
+    def __init__(self):
+        self.percursos = []
+        self.utilizadores = []
+
+    def inserir_percurso(self, origem, destino, poluicao, inclinacao, zonas_verdes):
+        p = Percurso(origem, destino, poluicao, inclinacao, zonas_verdes)
+        self.percursos.append(p)
+
+    def inserir_utilizador(self, nome, perfil):
+        u = Utilizador(nome, perfil)
+        self.utilizadores.append(u)
+
+    def listar_percursos(self):
+        if len(self.percursos) == 0:
+            print("Não existem percursos registados.")
+        else:
+            for p in self.percursos:
+                print(p.mostrar())
+
+    def listar_utilizadores(self):
+        if len(self.utilizadores) == 0:
+            print("Não existem utilizadores registados.")
+        else:
+            for u in self.utilizadores:
+                print(u.mostrar())
+
+    def procurar_utilizador(self, nome):
+        for u in self.utilizadores:
+            if u.nome == nome:
+                return u
+        return None
+
+    def ver_percurso(self, origem, destino):
+        for p in self.percursos:
+            if p.origem == origem and p.destino == destino:
+                print(p.mostrar())
+                return
+        print("Percurso não encontrado.")
+
+    def recomendar_percurso(self, origem, destino, nome_utilizador):
+        utilizador = self.procurar_utilizador(nome_utilizador)
+
+        if utilizador is None:
+            print("Utilizador não encontrado.")
+            return
+
+        melhor_percurso = None
+        melhor_conforto = -9999
+
+        for p in self.percursos:
+            if p.origem == origem and p.destino == destino:
+                conforto = p.calcular_conforto(utilizador.perfil)
+
+                if conforto > melhor_conforto:
+                    melhor_conforto = conforto
+                    melhor_percurso = p
+
+        if melhor_percurso is None:
+            print("Não existe percurso direto entre esses pontos.")
+        else:
+            print("Percurso recomendado para", utilizador.nome)
+            print(melhor_percurso.mostrar())
+            print("Índice de conforto:", melhor_conforto)
+
+    def gravar_ficheiro(self, nome_ficheiro):
+        dados = {
+            "percursos": [],
+            "utilizadores": []
+        }
+
+        for p in self.percursos:
+            dados["percursos"].append({
+                "origem": p.origem,
+                "destino": p.destino,
+                "poluicao": p.poluicao,
+                "inclinacao": p.inclinacao,
+                "zonas_verdes": p.zonas_verdes
+            })
+
+        for u in self.utilizadores:
+            dados["utilizadores"].append({
+                "nome": u.nome,
+                "perfil": u.perfil
+            })
+
+        ficheiro = open(nome_ficheiro, "w", encoding="utf-8")
+        json.dump(dados, ficheiro, indent=4)
+        ficheiro.close()
+
+        print("Dados gravados com sucesso.")
+
+    def ler_ficheiro(self, nome_ficheiro):
+        ficheiro = open(nome_ficheiro, "r", encoding="utf-8")
+        dados = json.load(ficheiro)
+        ficheiro.close()
+
+        self.percursos = []
+        self.utilizadores = []
+
+        for item in dados["percursos"]:
+            p = Percurso(
+                item["origem"],
+                item["destino"],
+                item["poluicao"],
+                item["inclinacao"],
+                item["zonas_verdes"]
+            )
+            self.percursos.append(p)
+
+        for item in dados["utilizadores"]:
+            u = Utilizador(item["nome"], item["perfil"])
+            self.utilizadores.append(u)
+
+        print("Dados lidos com sucesso.")
