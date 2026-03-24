@@ -1,0 +1,70 @@
+def mostrar_menu():
+    print("\nComandos disponíveis:")
+    print("1 - Inserir percurso")
+    print("2 - Inserir utilizador")
+    print("3 - Listar percursos")
+    print("4 - Listar utilizadores")
+    print("5 - Ver percurso")
+    print("6 - Recomendar percurso")
+    print("7 - Gravar ficheiro")
+    print("8 - Ler ficheiro")
+    print("0 - Sair")
+
+def main():
+    sistema = Sistema()
+
+    while True:
+        mostrar_menu()
+        op = input("Escolha uma opção: ")
+
+        if op == "1":
+            origem = input("Origem: ")
+            destino = input("Destino: ")
+            poluicao = float(input("Poluição: "))
+            inclinacao = float(input("Inclinação: "))
+            zonas_verdes = float(input("Zonas verdes: "))
+
+            sistema.inserir_percurso(origem, destino, poluicao, inclinacao, zonas_verdes)
+            print("Percurso inserido com sucesso.")
+
+        elif op == "2":
+            nome = input("Nome do utilizador: ")
+            perfil = input("Perfil (adulto / idoso / mobilidade_reduzida): ")
+
+            sistema.inserir_utilizador(nome, perfil)
+            print("Utilizador inserido com sucesso.")
+
+        elif op == "3":
+            sistema.listar_percursos()
+
+        elif op == "4":
+            sistema.listar_utilizadores()
+
+        elif op == "5":
+            origem = input("Origem: ")
+            destino = input("Destino: ")
+            sistema.ver_percurso(origem, destino)
+
+        elif op == "6":
+            origem = input("Origem: ")
+            destino = input("Destino: ")
+            nome = input("Nome do utilizador: ")
+            sistema.recomendar_percurso(origem, destino, nome)
+
+        elif op == "7":
+            ficheiro = input("Nome do ficheiro: ")
+            sistema.gravar_ficheiro(ficheiro)
+
+        elif op == "8":
+            ficheiro = input("Nome do ficheiro: ")
+            sistema.ler_ficheiro(ficheiro)
+
+        elif op == "0":
+            print("Programa terminado.")
+            break
+
+        else:
+            print("Opção inválida.")
+
+
+main()
